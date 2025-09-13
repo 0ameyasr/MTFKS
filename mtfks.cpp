@@ -2,17 +2,21 @@
 MTFKS: Multi-Threaded File Keyword/Regex Search
 */
 
-// Base program dependencies
+// Base Dependencies
 #include <iostream>
 #include <fstream>
-#include <chrono>
 #include <filesystem>
-#include <queue>
-#include <optional>
+
+// Concurrency Dependencies
+#include <chrono>
 #include <atomic>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+
+// Structures, Typing and Algorithms
+#include <queue>
+#include <optional>
 #include <functional>
 #include <algorithm>
 #include <regex>
@@ -20,34 +24,50 @@ MTFKS: Multi-Threaded File Keyword/Regex Search
 // Define the namespace
 namespace fs = std::filesystem;
 
+// Thread-Safe Queue Implementation
 struct ThreadSafeQueue {
+    // Queue container
     std::queue<fs::path> q;
     std::mutex m;
     std::condition_variable cv;
     bool finished{false};
 
+    // Push a file path into the queue
     void push(fs::path p) {
         {
+            // Use a Mutex Lock Guard to ensure no deadlocks occur
             std::lock_guard<std::mutex> lg(m);
             q.push(std::move(p));
         }
+
+        // Notify a sleeping worker to take up a task
         cv.notify_one();
     }
 
+    // Pop the object in the queue
     std::optional<fs::path> pop() {
+        // Use a unique lock instead of a lock guard
         std::unique_lock<std::mutex> ul(m);
         cv.wait(ul, [&]{ return finished || !q.empty(); });
+
+        // If the queue is empty, return a null object
         if (q.empty()) return std::nullopt;
+        
+        // Pop from the queue
         auto path = q.front();
         q.pop();
+
         return path;
     }
 
+    // Set the finished conditional flag
     void set_finished() {
         {
             std::lock_guard<std::mutex> lg(m);
             finished = true;
         }
+
+        // Notify all workers pre-merge, all tasks have been completed
         cv.notify_all();
     }
 };
@@ -58,18 +78,23 @@ std::mutex out_m;
 
 // Search Implementation (supports keyword or regex)
 bool search_file(const fs::path& p, const std::string& pattern, bool use_regex) {
+    // File Buffer
     std::ifstream ifs(p, std::ios::binary);
     if (!ifs) return false;
 
+    // Seek the size of the file
     ifs.seekg(0, std::ios::end);
     std::streamsize size = ifs.tellg();
     if (size < 0) return false;
 
+    // Copy contents of the file
     ifs.seekg(0, std::ios::beg);
     std::string contents(static_cast<size_t>(size), '\0');
 
+    // If empty, return False
     if (!ifs.read(&contents[0], size)) return false;
 
+    // If we're using regex, parse it
     if (use_regex) {
         try {
             std::regex re(pattern);
@@ -85,10 +110,12 @@ bool search_file(const fs::path& p, const std::string& pattern, bool use_regex) 
 // Worker (Consumer)
 void worker(ThreadSafeQueue& q, const std::string& pattern, bool use_regex) {
     while (true) {
+        // Pop object in queue
         auto option = q.pop();
         if (!option.has_value()) break;
         const auto path = *option;
 
+        // Search the file for the keyword/regex
         try {
             if (fs::is_regular_file(path)) {
                 ++n_files_scanned;
@@ -106,6 +133,7 @@ void worker(ThreadSafeQueue& q, const std::string& pattern, bool use_regex) {
 
 // Main Driver Program (Producer)
 int main(int argc, char** argv) {
+    // Handle arguments
     if (argc != 5) {
         std::cerr << "Usage: " << argv[0] << " <keyword|regex> <path> <n_threads> <mode>\n";
         std::cerr << "mode: 0 = plain keyword, 1 = regex\n";
@@ -119,6 +147,7 @@ int main(int argc, char** argv) {
 
     if (num_threads <= 0) num_threads = 1;
 
+    // Initialize queue, start the timer
     ThreadSafeQueue queue;
     auto t0 = std::chrono::steady_clock::now();
 
@@ -136,6 +165,7 @@ int main(int argc, char** argv) {
         std::cerr << "[walk error]" << e.what() << "\n";
     }
 
+    // All files parsed, end the timer, join all threads too
     queue.set_finished();
     for (auto& thread : threads) thread.join();
 
