@@ -1,1 +1,3 @@
-# SMTFuzz
+# MTFKS
+
+Multi-Threaded File Keyword Search (MTFKS / mt_search) is a simple C++ utility that recursively scans a directory for files containing a given keyword. It uses a producer–consumer model with a thread-safe work queue, allowing multiple worker threads to process files in parallel. This makes it a practical way to speed up large directory searches while also serving as a hands-on example of multithreading with `std::thread`, `std::mutex`, and `std::condition_variable`. The program reports matching file paths as well as a summary of the number of files scanned and total runtime.
